@@ -11,5 +11,6 @@ RUN dotnet publish SampleWebApiAspNetCore.csproj -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:7.0
 WORKDIR /app
 COPY --from=build /app/publish .
-EXPOSE 80
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+EXPOSE 8080
 ENTRYPOINT ["dotnet", "SampleWebApiAspNetCore.dll"]
