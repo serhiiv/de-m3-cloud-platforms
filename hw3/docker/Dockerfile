@@ -1,4 +1,4 @@
-FROM postgres:17.4
+FROM postgres:15.12
 
 RUN apt-get update && \
-    apt-get install -y postgresql-17-pglogical
+    apt-get install -y postgresql-15-pglogical
