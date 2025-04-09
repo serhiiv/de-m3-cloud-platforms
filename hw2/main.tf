@@ -13,6 +13,20 @@ locals {
 }
 
 
+provider "google" {
+  project = var.project
+  region  = var.region
+}
+
+
+resource "google_artifact_registry_repository" "my-repo" {
+  location      = var.region
+  project       = var.project
+  repository_id = var.repo
+  format        = "DOCKER"
+}
+
+
 provider "docker" {
   host = "unix:///var/run/docker.sock" # for local docker
   registry_auth {
@@ -39,25 +53,12 @@ resource "docker_registry_image" "registry" {
 }
 
 
-provider "google" {
-  project = var.project
-  region  = var.region
-}
-
-
-resource "google_artifact_registry_repository" "my-repo" {
-  location      = var.region
-  project       = var.project
-  repository_id = var.repo
-  format        = "DOCKER"
-}
-
-
 resource "google_cloud_run_v2_service" "default" {
-  name     = "cloudrun-asp-web-app"
-  location = var.region
-  project  = var.project
+  name                = "cloudrun-asp-web-app"
+  location            = var.region
+  project             = var.project
   deletion_protection = false
+  depends_on          = [docker_registry_image.registry]
 
   template {
     containers {
