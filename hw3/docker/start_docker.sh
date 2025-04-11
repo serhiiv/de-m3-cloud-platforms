@@ -1,6 +1,8 @@
 export POSTGRES_PASSWORD="it[y.MS6m0Eb9pK"
 
-docker compose up -d
+docker compose up -d --force-recreate
+
+sleep 5
 
 psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "
 SELECT name, setting, unit, source, boot_val, reset_val
@@ -33,3 +35,6 @@ DBS=("migration_user" "postgres" "periodic_table")
 for DB in "${DBS[@]}"; do
   psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/$DB" -f set_privileges.sql
 done
+
+
+# gcloud beta resource-config bulk-export --project=de-module-3 --resource-format=terraform >> gcp_resources.tf
