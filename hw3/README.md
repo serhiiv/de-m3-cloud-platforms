@@ -1,19 +1,28 @@
 # Testing replication of PostgreSQL from a Docker container to the Google Cloud SQL using pglogical.
 
-## PostgreSQL in Docker
+# Source
 
-### Deploy PostgreSQL in Docker
+## Start PostgreSQL in Docker with the bash script
+
+```bash
+script -c 'bash -v start_docker.sh'
+```
+
+or
+
+## PostgreSQL in Docker step by step
+
+#### Deploy PostgreSQL in Docker
 
 
 ```bash
-docker system df
-# 176.241.137.159
-
-export POSTGRES_PASSWORD="MS6m_0Eb9pK"
+export POSTGRES_PASSWORD="it[y.MS6m0Eb9pK"
+cat Dockerfile 
+cat docker-compose.yml
 docker compose up -d
 docker ps
 ```
-### Check parameters for replication. [link](https://cloud.google.com/database-migration/docs/postgres/configure-source-database?_gl=1*1wdtsoa*_ga*ODQxODUzNzk0LjE3MjUzNTQ0ODQ.*_ga_WH2QY8WWF5*MTc0NDEzMzU5Ni4zNjYuMS4xNzQ0MTM0MDQ1LjYwLjAuMA..#on-premise-self-managed-postgresql)
+#### Check parameters for replication. [link](https://cloud.google.com/database-migration/docs/postgres/configure-source-database?_gl=1*1wdtsoa*_ga*ODQxODUzNzk0LjE3MjUzNTQ0ODQ.*_ga_WH2QY8WWF5*MTc0NDEzMzU5Ni4zNjYuMS4xNzQ0MTM0MDQ1LjYwLjAuMA..#on-premise-self-managed-postgresql)
 
 ```sql
 psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "
@@ -40,135 +49,110 @@ Results like this
 | wal_level | replica | | command line | replica | replica |
 | wal_sender_timeout | 60000 | ms | command line | 60000 | 60000 |
 
-### Load database [Periodic table data](https://github.com/neondatabase-labs/postgres-sample-dbs/tree/main?tab=readme-ov-file#periodic-table-data)
+#### Load database [Periodic table](https://github.com/neondatabase-labs/postgres-sample-dbs/tree/main?tab=readme-ov-file#periodic-table-data)
 
 ```bash
-wget https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/periodic_table.sql
+wget -q https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/periodic_table.sql
 
 psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "CREATE DATABASE periodic_table;"
 
 psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/periodic_table" -f periodic_table.sql
 
-psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/periodic_table" -c 'select pt."AtomicNumber", pt."Element", pt."Symbol"  from periodic_table pt where pt."AtomicMass" < 10;'
-
 rm periodic_table.sql
 ```
 
-### Create user for migration
+#### Create user for migration
 
 ```bash
-psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "CREATE ROLE migration_user WITH LOGIN PASSWORD '${POSTGRES_PASSWORD}';"
+psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "CREATE ROLE migrant WITH LOGIN PASSWORD '${POSTGRES_PASSWORD}';"
 
-psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "ALTER ROLE migration_user WITH LOGIN;"
+psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "ALTER ROLE migrant WITH LOGIN;"
 
-psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "ALTER ROLE migration_user WITH REPLICATION;"
+psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "ALTER ROLE migrant WITH REPLICATION;"
 
-psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "CREATE DATABASE migration_user WITH OWNER migration_user;"
-```
+psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/postgres" -c "CREATE DATABASE migrant WITH OWNER migrant;"
 
-###  Setting privileges on databases
 
-```bash
-DBS=("migration_user" "postgres" "periodic_table")
+DBS=("migrant" "postgres" "periodic_table")
 for DB in "${DBS[@]}"; do
   psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/$DB" -f set_privileges.sql
 done
 ```
 
-
-
-
-
-
-
-
-
-
-
-## PostgreSQL in Google Cloud SQL
-
-### Get started
-
-Migration job name: Docker to Cloud SQL
-Migration job ID: docker-to-cloud-sql
-Source database engine: PostgreSQL
-Destination database engine: Cloud SQL for PostgreSQL
-Destination region: europe-north1 (Finland)
-Migration job type : Continuous
-
-### Define your source
-
-Connection profile name: Docker PostgreSQL Connection
-Connection profile ID: docker-postgresql-connection
-Region: europe-north1 (Finland)
-Hostname or IP address: 176.241.137.159
-Port: 5432
-Username: postgres
-Encryption type (SSL/TLS): None
-
-
-
-
-
-Delete project
+####  Check database load
 
 ```bash
-stop_cloud_docker.sh
+psql -d "postgres://postgres:${POSTGRES_PASSWORD}@localhost/periodic_table" -c 'select pt."AtomicNumber", pt."Element", pt."Symbol"  from periodic_table pt where pt."AtomicMass" < 10;'
 ```
 
-### Links
+# Destination
 
-- [Store Docker container images in Artifact Registry](Deploy the Docker container to Google Cloud Run.
-
-### Presets
-
-Install docker and gcloud
-
+## Apply with Terraform
 
 ```bash
-# set
-export GCP_PROJECT=<project_id>
-export GCP_REGION=<region_name>
+less main.tf
+
+terraform init
+terraform apply
+terraform state list
 ```
-Start project
+
+### Demote destination
 
 ```bash
-start_cloud_docker.sh
+export GCP_REGION="europe-north1"
+
+gcloud database-migration migration-jobs \
+	demote-destination pg-to-cloudsql \
+	--region=${GCP_REGION}
+
+while true; 
+do gcloud database-migration migration-jobs list --region=${GCP_REGION}; sleep 5; echo;
+done	
 ```
 
-Delete project
+### Start replication
 
 ```bash
-stop_cloud_docker.sh
+gcloud database-migration migration-jobs start pg-to-cloudsql \
+	--region=${GCP_REGION}
+
+while true; 
+do gcloud database-migration migration-jobs list --region=${GCP_REGION}; sleep 5; echo;
+done
 ```
 
-### Links
-
-- [](Deploy the Docker container to Google Cloud Run.
-
-### Presets
-
-Install docker and gcloud
-
+### Stop replication
 
 ```bash
-# set
-export GCP_PROJECT=<project_id>
-export GCP_REGION=<region_name>
+gcloud database-migration migration-jobs stop pg-to-cloudsql \
+	--region=${GCP_REGION}
+
+while true; 
+do gcloud database-migration migration-jobs list --region=${GCP_REGION}; sleep 5; echo;
+done
 ```
-Start project
+
+### Release
 
 ```bash
-start_cloud_docker.sh
+gcloud database-migration migration-jobs \
+	promote pg-to-cloudsql \
+	--region=${GCP_REGION}
+
+while true; 
+do gcloud database-migration migration-jobs list --region=${GCP_REGION}; sleep 5; echo;
+done
 ```
 
-Delete project
+### Finish
 
 ```bash
-stop_cloud_docker.sh
+terraform destroy
+terraform state list
 ```
 
-### Links
+# Links
 
 - [Migrate a database to Cloud SQL for PostgreSQL by using Database Migration Service](https://cloud.google.com/database-migration/docs/postgres/quickstart)
 - [Database Migration Service Connection Profile Postgres](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/database_migration_service_connection_profile#example-usage---database-migration-service-connection-profile-postgres)
