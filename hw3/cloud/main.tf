@@ -9,7 +9,7 @@ resource "google_sql_database_instance" "cloud_postgres_instance" {
   name                = "de-m3-migration"
   database_version    = "POSTGRES_15"
   region              = var.region
-  deletion_protection = true
+  deletion_protection = false
 
   settings {
     disk_autoresize = false
