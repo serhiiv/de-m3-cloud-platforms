@@ -1,0 +1,74 @@
+import os
+import json
+from google.cloud import storage
+from google.cloud import vision
+import tempfile
+import fitz  # PyMuPDF
+
+def process_pdf(event, context):
+    """Cloud Function triggered by a new file in the input bucket.
+    Args:
+        event (dict): The Cloud Functions event metadata.
+        context (google.cloud.functions.Context): The Cloud Functions event context.
+    """
+    file_name = event['name']
+    bucket_name = event['bucket']
+    output_bucket = os.environ.get('OUTPUT_BUCKET')
+
+    # Initialize clients
+    storage_client = storage.Client()
+    vision_client = vision.ImageAnnotatorClient()
+
+    # Get the input bucket and file
+    input_bucket = storage_client.bucket(bucket_name)
+    pdf_blob = input_bucket.blob(file_name)
+
+    # Create a temporary file to store the PDF
+    with tempfile.NamedTemporaryFile(suffix='.pdf') as temp_pdf:
+        pdf_blob.download_to_filename(temp_pdf.name)
+        
+        # Open the PDF with PyMuPDF
+        pdf_document = fitz.open(temp_pdf.name)
+        
+        # Process each page
+        results = []
+        for page_num in range(pdf_document.page_count):
+            page = pdf_document[page_num]
+            
+            # Convert PDF page to image
+            pix = page.get_pixmap()
+            with tempfile.NamedTemporaryFile(suffix='.png') as temp_image:
+                pix.save(temp_image.name)
+                
+                # Read the image file
+                with open(temp_image.name, 'rb') as image_file:
+                    content = image_file.read()
+                
+                # Perform OCR using Vision API
+                image = vision.Image(content=content)
+                response = vision_client.text_detection(image=image)
+                texts = response.text_annotations
+                
+                if texts:
+                    page_text = texts[0].description
+                    results.append({
+                        'page': page_num + 1,
+                        'text': page_text
+                    })
+
+        # Create JSON output
+        output = {
+            'file_name': file_name,
+            'total_pages': pdf_document.page_count,
+            'pages': results
+        }
+
+        # Upload JSON to output bucket
+        output_bucket_client = storage_client.bucket(output_bucket)
+        output_blob = output_bucket_client.blob(f"{os.path.splitext(file_name)[0]}.json")
+        output_blob.upload_from_string(
+            json.dumps(output, indent=2),
+            content_type='application/json'
+        )
+
+        return f"Successfully processed {file_name} and saved results to {output_bucket}"
