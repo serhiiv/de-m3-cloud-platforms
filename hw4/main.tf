@@ -22,7 +22,7 @@ provider "google" {
 
 # Create input bucket for PDFs
 resource "google_storage_bucket" "pdf_input_bucket" {
-  name                        = "${var.project_id}-pdf-input-${formatdate("YYYYMMDDhhmmss", timestamp())}"
+  name                        = "${var.project_id}-pdf-input"
   location                    = var.region
   force_destroy               = true
   uniform_bucket_level_access = true
@@ -30,7 +30,7 @@ resource "google_storage_bucket" "pdf_input_bucket" {
 
 # Create output bucket for JSON results
 resource "google_storage_bucket" "json_output_bucket" {
-  name                        = "${var.project_id}-json-output-${formatdate("YYYYMMDDhhmmss", timestamp())}"
+  name                        = "${var.project_id}-json-output"
   location                    = var.region
   force_destroy               = true
   uniform_bucket_level_access = true
@@ -46,8 +46,7 @@ resource "google_storage_bucket" "function_bucket" {
 data "archive_file" "function_zip" {
   type        = "zip"
   output_path = "${path.module}/function.zip"
-  source_dir  = "${path.module}"
-  excludes    = ["architecture.drawio", "main.tf", "variables.tf", "terraform.tfstate", "terraform.tfstate.backup", ".terraform"]
+  source_dir  = "${path.module}/function"
 }
 
 # Upload the Cloud Function source code
@@ -73,12 +72,18 @@ resource "google_project_service" "cloudbuild_api" {
   disable_dependent_services = true
 }
 
+resource "google_project_service" "run_api" {
+  service                    = "run.googleapis.com"
+  disable_dependent_services = true
+}
+
 # Wait for APIs to be enabled
 resource "time_sleep" "wait_30_seconds" {
   depends_on = [
     google_project_service.vision_api,
     google_project_service.cloudfunctions_api,
-    google_project_service.cloudbuild_api
+    google_project_service.cloudbuild_api,
+    google_project_service.run_api
   ]
 
   create_duration = "30s"
@@ -104,27 +109,39 @@ resource "google_project_iam_member" "function_vision_admin" {
   member  = "serviceAccount:${google_service_account.function_account.email}"
 }
 
-# Create Cloud Function
-resource "google_cloudfunctions_function" "pdf_processor" {
+# Create Cloud Function (Gen2)
+resource "google_cloudfunctions2_function" "pdf_processor" {
   name        = "pdf-processor"
+  location    = var.region
   description = "Process PDFs using Cloud Vision API"
-  runtime     = "python39"
-  region      = var.region
 
-  available_memory_mb   = 256
-  source_archive_bucket = google_storage_bucket.function_bucket.name
-  source_archive_object = google_storage_bucket_object.function_source.name
-  
-  entry_point = "process_pdf"
-  
-  event_trigger {
-    event_type = "google.storage.object.finalize"
-    resource   = google_storage_bucket.pdf_input_bucket.name
+  build_config {
+    runtime     = "python39"
+    entry_point = "process_pdf"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_bucket.name
+        object = google_storage_bucket_object.function_source.name
+      }
+    }
   }
 
-  service_account_email = google_service_account.function_account.email
+  service_config {
+    max_instance_count = 1
+    available_memory   = "256M"
+    service_account_email = google_service_account.function_account.email
+    environment_variables = {
+      OUTPUT_BUCKET = google_storage_bucket.json_output_bucket.name
+    }
+  }
 
-  environment_variables = {
-    OUTPUT_BUCKET = google_storage_bucket.json_output_bucket.name
+  event_trigger {
+    trigger_region = var.region
+    event_type    = "google.cloud.storage.object.v1.finalized"
+    retry_policy  = "RETRY_POLICY_DO_NOT_RETRY"
+    event_filters {
+      attribute = "bucket"
+      value     = google_storage_bucket.pdf_input_bucket.name
+    }
   }
 }
